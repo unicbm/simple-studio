@@ -5,10 +5,38 @@ import type {
   RequestMessage,
 } from "../types";
 
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalizedHostname = normalizeHostname(hostname);
+  if (!normalizedHostname) {
+    return false;
+  }
+
+  if (
+    normalizedHostname === "localhost" ||
+    normalizedHostname.endsWith(".localhost") ||
+    normalizedHostname === "::1"
+  ) {
+    return true;
+  }
+
+  const ipv4Match = normalizedHostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  return ipv4Match !== null && Number(ipv4Match[1]) === 127;
+}
+
+function isAllowedBaseUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHostname(url.hostname));
+}
+
 export function validateSettings(settings: AppSettings): string[] {
   const errors: string[] = [];
+  const trimmedBaseUrl = settings.baseUrl.trim();
 
-  if (!settings.baseUrl.trim()) {
+  if (!trimmedBaseUrl) {
     errors.push("Base URL is required.");
   }
   if (!settings.apiKey.trim()) {
@@ -19,8 +47,12 @@ export function validateSettings(settings: AppSettings): string[] {
   }
 
   try {
-    if (settings.baseUrl.trim()) {
-      new URL(settings.baseUrl.trim());
+    if (trimmedBaseUrl) {
+      if (!isAllowedBaseUrl(trimmedBaseUrl)) {
+        errors.push(
+          "Base URL must use HTTPS unless it targets localhost or another loopback address.",
+        );
+      }
     }
   } catch {
     errors.push("Base URL must be a valid absolute URL.");

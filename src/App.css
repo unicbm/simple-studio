@@ -473,10 +473,20 @@ button {
   margin: 0;
 }
 
+.markdown-block a {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
 .inline-code {
   padding: 1px 6px;
   border-radius: 6px;
   background: rgba(37, 99, 235, 0.08);
+}
+
+.blocked-asset {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .code-shell {

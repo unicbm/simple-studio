@@ -110,6 +110,8 @@ The current client expects a single OpenAI-compatible endpoint:
 - `apiKey`
 - `model`
 
+Remote providers must use `https://`. Plain `http://` is only accepted for local loopback targets such as `localhost`, `127.0.0.1`, or `::1`.
+
 Example:
 
 - `https://api.deepseek.com`
@@ -147,6 +149,8 @@ type ExportBlob = {
   sessions: ChatSession[];
 };
 ```
+
+New exports intentionally omit `apiKey`. Re-enter the key after importing on another machine.
 
 ## Build Output
 

@@ -15,6 +15,26 @@ describe("chatState", () => {
     );
   });
 
+  it("rejects non-local HTTP base URLs", () => {
+    expect(
+      validateSettings({
+        baseUrl: "http://api.example.com",
+        apiKey: "secret",
+        model: "demo",
+      }),
+    ).toContain("Base URL must use HTTPS unless it targets localhost or another loopback address.");
+  });
+
+  it("allows loopback HTTP base URLs", () => {
+    expect(
+      validateSettings({
+        baseUrl: "http://127.0.0.1:11434",
+        apiKey: "secret",
+        model: "demo",
+      }),
+    ).toEqual([]);
+  });
+
   it("creates compact session titles", () => {
     expect(makeTitleFromContent("  explain    tauri channels in detail  ")).toBe(
       "explain tauri channels in detail",

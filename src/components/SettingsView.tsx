@@ -73,6 +73,10 @@ export function SettingsView({
                 placeholder="https://api.openai.com"
                 value={formState.baseUrl}
               />
+              <p className="field-help">
+                Remote providers must use HTTPS. Plain HTTP is only allowed for localhost and
+                loopback endpoints.
+              </p>
             </div>
             <div className="settings-field">
               <label htmlFor="model">Model</label>
@@ -122,7 +126,8 @@ export function SettingsView({
           <div>
             <h3>Data</h3>
             <p className="settings-note">
-              Export conversations as JSON or import a previously saved snapshot.
+              Export conversations as JSON or import a previously saved snapshot. API keys are
+              excluded from new exports.
             </p>
           </div>
           <div className="settings-actions">

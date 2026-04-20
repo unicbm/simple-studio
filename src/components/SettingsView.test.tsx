@@ -55,4 +55,37 @@ describe("SettingsView", () => {
       systemPrompt: "",
     });
   });
+
+  it("rejects remote HTTP endpoints", () => {
+    const onSave = vi.fn();
+
+    render(
+      <SettingsView
+        errorMessage={null}
+        initialSettings={{ baseUrl: "", apiKey: "", model: "", systemPrompt: "" }}
+        onBack={() => undefined}
+        onExport={() => undefined}
+        onImport={() => undefined}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("https://api.openai.com"), {
+      target: { value: "http://api.example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("sk-..."), {
+      target: { value: "secret" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("gpt-4.1-mini"), {
+      target: { value: "demo-model" },
+    });
+    fireEvent.click(screen.getByText("Save settings"));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Base URL must use HTTPS unless it targets localhost or another loopback address.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

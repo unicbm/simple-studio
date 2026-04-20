@@ -1,12 +1,14 @@
 use std::{
     collections::HashMap,
+    net::IpAddr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
@@ -58,6 +60,7 @@ impl AppState {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     base_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -235,7 +238,7 @@ async fn delete_session(app: AppHandle, session_id: String) -> Result<(), String
 async fn export_data(app: AppHandle, path: String) -> Result<(), String> {
     let export = ExportBlob {
         schema_version: SCHEMA_VERSION,
-        settings: load_settings(app.clone()).await?,
+        settings: redact_settings_for_export(load_settings(app.clone()).await?),
         sessions: read_sessions(&app).await?,
     };
     write_json_file(PathBuf::from(path), &export).await
@@ -391,6 +394,7 @@ fn validate_stream_payload(payload: &StreamRequestPayload) -> Result<(), String>
     if payload.settings.base_url.trim().is_empty() {
         return Err("Base URL is required.".to_string());
     }
+    validate_base_url(payload.settings.base_url.trim())?;
     if payload.settings.api_key.trim().is_empty() {
         return Err("API key is required.".to_string());
     }
@@ -401,6 +405,41 @@ fn validate_stream_payload(payload: &StreamRequestPayload) -> Result<(), String>
         return Err("At least one message is required.".to_string());
     }
     Ok(())
+}
+
+fn validate_base_url(base_url: &str) -> Result<(), String> {
+    let url = Url::parse(base_url).map_err(|_| "Base URL must be a valid absolute URL.".to_string())?;
+    let scheme = url.scheme().to_ascii_lowercase();
+    if scheme == "https" {
+        return Ok(());
+    }
+
+    let host = url.host_str().unwrap_or_default();
+    if scheme == "http" && is_loopback_host(host) {
+        return Ok(());
+    }
+
+    Err("Base URL must use HTTPS unless it targets localhost or another loopback address.".to_string())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host.trim_matches(&['[', ']']).to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if normalized == "localhost" || normalized.ends_with(".localhost") {
+        return true;
+    }
+
+    IpAddr::from_str(&normalized)
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+}
+
+fn redact_settings_for_export(mut settings: AppSettings) -> AppSettings {
+    settings.api_key.clear();
+    settings
 }
 
 fn build_chat_request_body(payload: &StreamRequestPayload) -> serde_json::Value {
@@ -653,7 +692,6 @@ mod tests {
             "schemaVersion": 1,
             "settings": {
                 "baseUrl": "https://api.example.com",
-                "apiKey": "secret",
                 "model": "demo",
                 "systemPrompt": ""
             },
@@ -661,6 +699,35 @@ mod tests {
         }"#;
         let parsed = parse_export_blob(content).expect("export should parse");
         assert_eq!(parsed.schema_version, 1);
+        assert_eq!(parsed.settings.api_key, "");
+    }
+
+    #[test]
+    fn rejects_non_local_http_base_urls() {
+        assert_eq!(
+            validate_base_url("http://api.example.com").expect_err("remote http should fail"),
+            "Base URL must use HTTPS unless it targets localhost or another loopback address."
+        );
+    }
+
+    #[test]
+    fn allows_loopback_http_base_urls() {
+        validate_base_url("http://127.0.0.1:11434").expect("loopback http should be allowed");
+        validate_base_url("http://localhost:11434").expect("localhost http should be allowed");
+    }
+
+    #[test]
+    fn redacts_api_key_from_exports() {
+        let settings = redact_settings_for_export(AppSettings {
+            base_url: "https://api.example.com".to_string(),
+            api_key: "secret".to_string(),
+            model: "demo".to_string(),
+            system_prompt: String::new(),
+        });
+
+        let serialized = serde_json::to_string(&settings).expect("settings should serialize");
+        assert!(!serialized.contains("secret"));
+        assert!(!serialized.contains("apiKey"));
     }
 
     #[test]
