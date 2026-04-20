@@ -118,28 +118,48 @@ struct ImportedData {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "event", content = "data")]
 enum StreamEvent {
-    Started {
-        request_id: String,
-        message_id: String,
-    },
-    Delta {
-        request_id: String,
-        message_id: String,
-        text_chunk: String,
-    },
-    Done {
-        request_id: String,
-        message_id: String,
-    },
-    Error {
-        request_id: String,
-        message_id: String,
-        message: String,
-    },
-    Aborted {
-        request_id: String,
-        message_id: String,
-    },
+    Started(StreamStartedPayload),
+    Delta(StreamDeltaPayload),
+    Done(StreamDonePayload),
+    Error(StreamErrorPayload),
+    Aborted(StreamAbortedPayload),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamStartedPayload {
+    request_id: String,
+    message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamDeltaPayload {
+    request_id: String,
+    message_id: String,
+    text_chunk: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamDonePayload {
+    request_id: String,
+    message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamErrorPayload {
+    request_id: String,
+    message_id: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamAbortedPayload {
+    request_id: String,
+    message_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,10 +269,10 @@ async fn start_chat_stream(
 
     tauri::async_runtime::spawn(async move {
         let client = Client::new();
-        let _ = on_event.send(StreamEvent::Started {
+        let _ = on_event.send(StreamEvent::Started(StreamStartedPayload {
             request_id: request_id.clone(),
             message_id: message_id.clone(),
-        });
+        }));
 
         let response = client
             .post(request_url)
@@ -280,10 +300,10 @@ async fn start_chat_stream(
                 loop {
                     tokio::select! {
                         _ = &mut abort_rx => {
-                            let _ = on_event.send(StreamEvent::Aborted {
+                            let _ = on_event.send(StreamEvent::Aborted(StreamAbortedPayload {
                                 request_id: request_id.clone(),
                                 message_id: message_id.clone(),
-                            });
+                            }));
                             let _ = registry.remove(&request_id);
                             break;
                         }
@@ -294,17 +314,17 @@ async fn start_chat_stream(
                                     while let Some(frame) = take_sse_frame(&mut buffer) {
                                         match parse_frame(&frame) {
                                             Ok(FrameResult::Delta(text_chunk)) => {
-                                                let _ = on_event.send(StreamEvent::Delta {
+                                                let _ = on_event.send(StreamEvent::Delta(StreamDeltaPayload {
                                                     request_id: request_id.clone(),
                                                     message_id: message_id.clone(),
                                                     text_chunk,
-                                                });
+                                                }));
                                             }
                                             Ok(FrameResult::Done) => {
-                                                let _ = on_event.send(StreamEvent::Done {
+                                                let _ = on_event.send(StreamEvent::Done(StreamDonePayload {
                                                     request_id: request_id.clone(),
                                                     message_id: message_id.clone(),
-                                                });
+                                                }));
                                                 finished = true;
                                                 break;
                                             }
@@ -328,10 +348,10 @@ async fn start_chat_stream(
                                 }
                                 None => {
                                     if !finished {
-                                        let _ = on_event.send(StreamEvent::Done {
+                                        let _ = on_event.send(StreamEvent::Done(StreamDonePayload {
                                             request_id: request_id.clone(),
                                             message_id: message_id.clone(),
-                                        });
+                                        }));
                                     }
                                     let _ = registry.remove(&request_id);
                                     break;
@@ -420,20 +440,28 @@ fn parse_frame(frame: &str) -> Result<FrameResult, String> {
 }
 
 fn take_sse_frame(buffer: &mut String) -> Option<String> {
-    buffer.find("\n\n").map(|index| {
+    let (index, separator_len) = if let Some(index) = buffer.find("\r\n\r\n") {
+        (index, 4)
+    } else if let Some(index) = buffer.find("\n\n") {
+        (index, 2)
+    } else {
+        return None;
+    };
+
+    Some({
         let frame = buffer[..index].to_string();
-        let remaining = buffer[index + 2..].to_string();
+        let remaining = buffer[index + separator_len..].to_string();
         *buffer = remaining;
         frame
     })
 }
 
 fn send_error(on_event: &Channel<StreamEvent>, request_id: &str, message_id: &str, message: &str) {
-    let _ = on_event.send(StreamEvent::Error {
+    let _ = on_event.send(StreamEvent::Error(StreamErrorPayload {
         request_id: request_id.to_string(),
         message_id: message_id.to_string(),
         message: message.to_string(),
-    });
+    }));
 }
 
 async fn read_sessions(app: &AppHandle) -> Result<Vec<ChatSession>, String> {
@@ -578,5 +606,33 @@ mod tests {
         }"#;
         let parsed = parse_export_blob(content).expect("export should parse");
         assert_eq!(parsed.schema_version, 1);
+    }
+
+    #[test]
+    fn serializes_stream_event_payload_fields_as_camel_case() {
+        let event = StreamEvent::Delta(StreamDeltaPayload {
+            request_id: "req-1".to_string(),
+            message_id: "msg-1".to_string(),
+            text_chunk: "Hello".to_string(),
+        });
+
+        let value = serde_json::to_value(event).expect("stream event should serialize");
+
+        assert_eq!(value["event"], "delta");
+        assert_eq!(value["data"]["requestId"], "req-1");
+        assert_eq!(value["data"]["messageId"], "msg-1");
+        assert_eq!(value["data"]["textChunk"], "Hello");
+    }
+
+    #[test]
+    fn splits_crlf_sse_frames() {
+        let mut buffer =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\r\n\r\n".to_string();
+        let frame = take_sse_frame(&mut buffer).expect("frame should split");
+        assert_eq!(
+            frame,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}"
+        );
+        assert!(buffer.is_empty());
     }
 }

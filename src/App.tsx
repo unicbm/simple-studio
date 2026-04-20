@@ -100,15 +100,47 @@ function App() {
     [activeSessionId, sessions],
   );
 
+  function commitSessions(nextSessions: ChatSession[]) {
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+  }
+
+  function upsertSessionInMemory(nextSession: ChatSession) {
+    const nextSessions = replaceSession(sessionsRef.current, nextSession);
+    commitSessions(nextSessions);
+    return nextSession;
+  }
+
   async function persistSession(nextSession: ChatSession) {
-    setSessions((currentSessions) => replaceSession(currentSessions, nextSession));
-    await saveSession(nextSession);
+    const committedSession = upsertSessionInMemory(nextSession);
+    await saveSession(committedSession);
+  }
+
+  function updateSession(
+    sessionId: string,
+    updater: (session: ChatSession) => ChatSession,
+    options?: { persist?: boolean },
+  ) {
+    const sourceSession = sessionsRef.current.find((session) => session.id === sessionId);
+    if (!sourceSession) {
+      return null;
+    }
+
+    const nextSession = updater(sourceSession);
+    upsertSessionInMemory(nextSession);
+
+    if (options?.persist) {
+      void saveSession(nextSession);
+    }
+
+    return nextSession;
   }
 
   async function handleCreateSession() {
     const session = createEmptySession();
     startTransition(() => {
-      setSessions((currentSessions) => [session, ...currentSessions]);
+      const nextSessions = [session, ...sessionsRef.current];
+      commitSessions(nextSessions);
       setActiveSessionId(session.id);
       setView("chat");
     });
@@ -116,9 +148,9 @@ function App() {
   }
 
   async function handleDeleteSession(sessionId: string) {
-    const nextSessions = sessions.filter((session) => session.id !== sessionId);
+    const nextSessions = sessionsRef.current.filter((session) => session.id !== sessionId);
     startTransition(() => {
-      setSessions(nextSessions);
+      commitSessions(nextSessions);
       setActiveSessionId((currentId) => {
         if (currentId !== sessionId) {
           return currentId;
@@ -150,7 +182,7 @@ function App() {
     }
 
     const session = createEmptySession();
-    setSessions((currentSessions) => [session, ...currentSessions]);
+    commitSessions([session, ...sessionsRef.current]);
     setActiveSessionId(session.id);
     void saveSession(session);
     return session;
@@ -192,82 +224,75 @@ function App() {
 
     const onEvent = (event: StreamEvent) => {
       if (event.event === "delta") {
-        const sourceSession = sessionsRef.current.find((item) => item.id === session.id);
-        if (!sourceSession) {
-          return;
-        }
-
-        const updatedSession = appendAssistantChunk(
-          sourceSession,
-          event.data.messageId,
-          event.data.textChunk,
+        updateSession(
+          session.id,
+          (sourceSession) =>
+            appendAssistantChunk(
+              sourceSession,
+              event.data.messageId,
+              event.data.textChunk,
+            ),
+          { persist: false },
         );
-        void persistSession(updatedSession);
         return;
       }
 
       if (event.event === "done") {
-        const sourceSession = sessionsRef.current.find((item) => item.id === session.id);
-        if (!sourceSession) {
-          return;
-        }
-
-        const updatedSession: ChatSession = {
-          ...sourceSession,
-          updatedAt: new Date().toISOString(),
-          messages: sourceSession.messages.map((message) =>
-            message.id === event.data.messageId
-              ? { ...message, status: "done" }
-              : message,
-          ),
-        };
-        void persistSession(updatedSession);
+        updateSession(
+          session.id,
+          (sourceSession) => ({
+            ...sourceSession,
+            updatedAt: new Date().toISOString(),
+            messages: sourceSession.messages.map((message) =>
+              message.id === event.data.messageId
+                ? { ...message, status: "done" }
+                : message,
+            ),
+          }),
+          { persist: true },
+        );
         setCurrentRequestId(null);
         setStatusMessage("Ready.");
         return;
       }
 
       if (event.event === "aborted") {
-        const sourceSession = sessionsRef.current.find((item) => item.id === session.id);
-        if (!sourceSession) {
-          return;
-        }
-
-        const updatedSession: ChatSession = {
-          ...sourceSession,
-          updatedAt: new Date().toISOString(),
-          messages: sourceSession.messages.map((message) =>
-            message.id === event.data.messageId
-              ? { ...message, status: "error" }
-              : message,
-          ),
-        };
-        void persistSession(updatedSession);
+        updateSession(
+          session.id,
+          (sourceSession) => ({
+            ...sourceSession,
+            updatedAt: new Date().toISOString(),
+            messages: sourceSession.messages.map((message) =>
+              message.id === event.data.messageId
+                ? { ...message, status: "error" }
+                : message,
+            ),
+          }),
+          { persist: true },
+        );
         setCurrentRequestId(null);
         setStatusMessage("Generation stopped.");
         return;
       }
 
       if (event.event === "error") {
-        const sourceSession = sessionsRef.current.find((item) => item.id === session.id);
-        if (!sourceSession) {
-          return;
-        }
-
-        const updatedSession: ChatSession = {
-          ...sourceSession,
-          updatedAt: new Date().toISOString(),
-          messages: sourceSession.messages.map((message) =>
-            message.id === event.data.messageId
-              ? {
-                  ...message,
-                  status: "error",
-                  content: event.data.message || message.content,
-                }
-              : message,
-          ),
-        };
-        void persistSession(updatedSession);
+        updateSession(
+          session.id,
+          (sourceSession) => ({
+            ...sourceSession,
+            updatedAt: new Date().toISOString(),
+            messages: sourceSession.messages.map((message) =>
+              message.id === event.data.messageId
+                ? {
+                    ...message,
+                    status: "error",
+                    content: event.data.message || message.content,
+                  }
+                : message,
+            ),
+          }),
+          { persist: true },
+        );
         setCurrentRequestId(null);
         setStatusMessage(null);
         setErrorMessage(event.data.message);
@@ -373,7 +398,7 @@ function App() {
     const imported = await importData(path);
     startTransition(() => {
       setSettings(imported.settings);
-      setSessions(imported.sessions);
+      commitSessions(imported.sessions);
       setActiveSessionId(imported.sessions[0]?.id ?? null);
       setView("chat");
       setErrorMessage(null);
