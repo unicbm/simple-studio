@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::StreamExt;
@@ -179,8 +180,17 @@ struct ChunkDelta {
 
 #[tauri::command]
 async fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
-    match tokio::fs::read_to_string(settings_path(&app)?).await {
-        Ok(content) => serde_json::from_str(&content).map_err(|error| error.to_string()),
+    let path = settings_path(&app)?;
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) => match parse_settings(&content) {
+            Ok(settings) => Ok(settings),
+            Err(error) => {
+                eprintln!("Failed to parse settings.json, resetting file: {error}");
+                let fallback = AppSettings::default();
+                recover_corrupted_json_file(&path, &content, &fallback).await?;
+                Ok(fallback)
+            }
+        },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AppSettings::default()),
         Err(error) => Err(error.to_string()),
     }
@@ -465,12 +475,19 @@ fn send_error(on_event: &Channel<StreamEvent>, request_id: &str, message_id: &st
 }
 
 async fn read_sessions(app: &AppHandle) -> Result<Vec<ChatSession>, String> {
-    match tokio::fs::read_to_string(sessions_path(app)?).await {
-        Ok(content) => {
-            let mut sessions = serde_json::from_str::<Vec<ChatSession>>(&content)
-                .map_err(|error| error.to_string())?;
-            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-            Ok(sessions)
+    let path = sessions_path(app)?;
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) => match parse_sessions(&content) {
+            Ok(mut sessions) => {
+                sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+                Ok(sessions)
+            }
+            Err(error) => {
+                eprintln!("Failed to parse sessions.json, resetting file: {error}");
+                let fallback = Vec::<ChatSession>::new();
+                recover_corrupted_json_file(&path, &content, &fallback).await?;
+                Ok(fallback)
+            }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(error) => Err(error.to_string()),
@@ -500,6 +517,44 @@ async fn write_json_file<T: Serialize>(path: PathBuf, value: &T) -> Result<(), S
     tokio::fs::write(path, content)
         .await
         .map_err(|error| error.to_string())
+}
+
+fn parse_settings(content: &str) -> Result<AppSettings, String> {
+    serde_json::from_str(content).map_err(|error| error.to_string())
+}
+
+fn parse_sessions(content: &str) -> Result<Vec<ChatSession>, String> {
+    serde_json::from_str(content).map_err(|error| error.to_string())
+}
+
+async fn recover_corrupted_json_file<T: Serialize>(
+    path: &Path,
+    content: &str,
+    fallback: &T,
+) -> Result<(), String> {
+    let backup_path = corrupted_backup_path(path)?;
+    tokio::fs::write(&backup_path, content)
+        .await
+        .map_err(|error| error.to_string())?;
+    write_json_file(path.to_path_buf(), fallback).await
+}
+
+fn corrupted_backup_path(path: &Path) -> Result<PathBuf, String> {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Failed to derive backup filename.".to_string())?;
+    let extension = path.extension().and_then(|value| value.to_str());
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let backup_name = match extension {
+        Some(extension) => format!("{stem}.corrupt.{timestamp}.{extension}"),
+        None => format!("{stem}.corrupt.{timestamp}"),
+    };
+
+    Ok(path.with_file_name(backup_name))
 }
 
 fn parse_export_blob(content: &str) -> Result<ExportBlob, String> {
@@ -634,5 +689,38 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}"
         );
         assert!(buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recovers_corrupted_json_file_with_backup_and_fallback() {
+        let temp_dir = std::env::temp_dir().join(format!("tauri-studio-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir)
+            .await
+            .expect("temp dir should be created");
+
+        let path = temp_dir.join("sessions.json");
+        tokio::fs::write(&path, "[}]")
+            .await
+            .expect("corrupted file should be written");
+
+        recover_corrupted_json_file(&path, "[}]", &Vec::<ChatSession>::new())
+            .await
+            .expect("corrupted file should be recovered");
+
+        let repaired = tokio::fs::read_to_string(&path)
+            .await
+            .expect("fallback file should be readable");
+        assert_eq!(repaired.trim(), "[]");
+
+        let backup_names = std::fs::read_dir(&temp_dir)
+            .expect("temp dir should be readable")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(backup_names.iter().any(|name| {
+            name.starts_with("sessions.corrupt.") && name.ends_with(".json")
+        }));
+
+        std::fs::remove_dir_all(&temp_dir).expect("temp dir should be removed");
     }
 }
