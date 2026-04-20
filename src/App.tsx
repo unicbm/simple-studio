@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { MarkdownMessage } from "./components/MarkdownMessage";
-import { SettingsSheet } from "./components/SettingsSheet";
+import { ChatView } from "./components/ChatView";
+import { PrimaryNav } from "./components/PrimaryNav";
+import { SessionListPane } from "./components/SessionListPane";
+import { SettingsView } from "./components/SettingsView";
 import {
   appendAssistantChunk,
   buildRequestMessages,
@@ -39,11 +41,11 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 function App() {
+  const [view, setView] = useState<"chat" | "settings">("chat");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -108,6 +110,7 @@ function App() {
     startTransition(() => {
       setSessions((currentSessions) => [session, ...currentSessions]);
       setActiveSessionId(session.id);
+      setView("chat");
     });
     await saveSession(session);
   }
@@ -136,9 +139,9 @@ function App() {
 
     setSettings(nextSettings);
     setErrorMessage(null);
-    await saveSettings(nextSettings);
     setStatusMessage("Settings saved.");
-    setIsSettingsOpen(false);
+    await saveSettings(nextSettings);
+    setView("chat");
   }
 
   function ensureActiveSession(): ChatSession {
@@ -256,7 +259,11 @@ function App() {
           updatedAt: new Date().toISOString(),
           messages: sourceSession.messages.map((message) =>
             message.id === event.data.messageId
-              ? { ...message, status: "error", content: event.data.message || message.content }
+              ? {
+                  ...message,
+                  status: "error",
+                  content: event.data.message || message.content,
+                }
               : message,
           ),
         };
@@ -290,7 +297,7 @@ function App() {
     }
 
     if (!isSettingsComplete(settings)) {
-      setIsSettingsOpen(true);
+      setView("settings");
       setErrorMessage("Configure base URL, API key, and model before chatting.");
       return;
     }
@@ -368,6 +375,7 @@ function App() {
       setSettings(imported.settings);
       setSessions(imported.sessions);
       setActiveSessionId(imported.sessions[0]?.id ?? null);
+      setView("chat");
       setErrorMessage(null);
       setStatusMessage("Data imported.");
     });
@@ -375,155 +383,63 @@ function App() {
 
   if (loading) {
     return (
-      <main className="shell loading-shell">
-        <div className="loading-panel">
-          <p className="eyebrow">Tauri Studio</p>
-          <h1>Booting local workspace</h1>
-          <p>Loading settings, sessions, and app data.</p>
+      <main className="app-shell loading-shell">
+        <div className="loading-card">
+          <span className="section-label">Tauri Studio</span>
+          <h1>Loading workspace</h1>
+          <p>Reading your local settings and conversation history.</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <p className="eyebrow">Desktop LLM Console</p>
-          <h1>Tauri Studio</h1>
-          <p className="muted">
-            OpenAI-compatible chat, local persistence, and streaming replies.
-          </p>
-        </div>
-
-        <div className="sidebar-actions">
-          <button className="primary-button" onClick={() => void handleCreateSession()}>
-            New Session
-          </button>
-          <button className="ghost-button" onClick={() => setIsSettingsOpen(true)}>
-            Settings
-          </button>
-          <button className="ghost-button" onClick={() => void handleExport()}>
-            Export JSON
-          </button>
-          <button className="ghost-button" onClick={() => void handleImport()}>
-            Import JSON
-          </button>
-        </div>
-
-        <div className="session-list">
-          {sessions.length === 0 ? (
-            <div className="empty-card">
-              <p>No conversations yet.</p>
-              <span>Start a session and send your first prompt.</span>
-            </div>
-          ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                className={session.id === activeSessionId ? "session-card active" : "session-card"}
-                onClick={() => setActiveSessionId(session.id)}
-              >
-                <span>{session.title}</span>
-                <small>{new Date(session.updatedAt).toLocaleString()}</small>
-                <strong>{session.messages.length} messages</strong>
-                <i
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleDeleteSession(session.id);
-                  }}
-                >
-                  Delete
-                </i>
-              </button>
-            ))
-          )}
-        </div>
-      </aside>
-
-      <section className="chat-panel">
-        <header className="chat-header">
-          <div>
-            <p className="eyebrow">Conversation</p>
-            <h2>{activeSession?.title ?? "Select or create a session"}</h2>
-          </div>
-          <div className="toolbar">
-            <button className="ghost-button" onClick={() => void handleRetry()}>
-              Retry
-            </button>
-            <button
-              className="ghost-button"
-              disabled={!currentRequestId}
-              onClick={() => void handleStop()}
-            >
-              Stop
-            </button>
-          </div>
-        </header>
-
-        <section className="status-strip">
-          <div>
-            <span className="status-dot" />
-            <p>{statusMessage ?? "Idle"}</p>
-          </div>
-          {!isSettingsComplete(settings) ? (
-            <small>Settings incomplete. Open the panel to configure your endpoint.</small>
-          ) : (
-            <small>
-              {settings.model} via {settings.baseUrl}
-            </small>
-          )}
-        </section>
-
-        <section className="message-list">
-          {activeSession?.messages.length ? (
-            activeSession.messages.map((message) => (
-              <article key={message.id} className={`message-card role-${message.role}`}>
-                <header>
-                  <span>{message.role}</span>
-                  <small>{new Date(message.createdAt).toLocaleTimeString()}</small>
-                  {message.status ? <em>{message.status}</em> : null}
-                </header>
-                <MarkdownMessage content={message.content || "_Waiting for response..._"} />
-              </article>
-            ))
-          ) : (
-            <div className="empty-stage">
-              <p>Minimal by design.</p>
-              <span>
-                One protocol, one window, one local store. Configure the endpoint and start
-                chatting.
-              </span>
-            </div>
-          )}
-        </section>
-
-        <footer className="composer">
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            placeholder="Ask the model something concrete."
-            rows={4}
-          />
-          <div className="composer-actions">
-            <div>{errorMessage ? <p className="error-copy">{errorMessage}</p> : null}</div>
-            <button
-              className="primary-button"
-              disabled={!draft.trim() || Boolean(currentRequestId)}
-              onClick={() => void handleSend()}
-            >
-              Send
-            </button>
-          </div>
-        </footer>
-      </section>
-
-      <SettingsSheet
-        isOpen={isSettingsOpen}
-        initialSettings={settings}
-        onClose={() => setIsSettingsOpen(false)}
-        onSave={(nextSettings) => void handleSaveSettings(nextSettings)}
+    <main className="app-shell">
+      <PrimaryNav
+        currentView={view}
+        isConfigured={isSettingsComplete(settings)}
+        sessionCount={sessions.length}
+        onChangeView={setView}
       />
+
+      <SessionListPane
+        activeSessionId={activeSessionId}
+        sessions={sessions}
+        onCreateSession={() => void handleCreateSession()}
+        onDeleteSession={(sessionId) => void handleDeleteSession(sessionId)}
+        onSelectSession={(sessionId) => {
+          setActiveSessionId(sessionId);
+          setView("chat");
+        }}
+      />
+
+      {view === "settings" ? (
+        <SettingsView
+          errorMessage={errorMessage}
+          initialSettings={settings}
+          onBack={() => setView("chat")}
+          onExport={() => void handleExport()}
+          onImport={() => void handleImport()}
+          onSave={(nextSettings) => void handleSaveSettings(nextSettings)}
+        />
+      ) : (
+        <ChatView
+          activeSession={activeSession}
+          currentRequestId={currentRequestId}
+          draft={draft}
+          errorMessage={errorMessage}
+          hasSessions={sessions.length > 0}
+          isConfigured={isSettingsComplete(settings)}
+          settings={settings}
+          statusMessage={statusMessage}
+          onChangeDraft={setDraft}
+          onCreateSession={() => void handleCreateSession()}
+          onOpenSettings={() => setView("settings")}
+          onRetry={() => void handleRetry()}
+          onSend={() => void handleSend()}
+          onStop={() => void handleStop()}
+        />
+      )}
     </main>
   );
 }

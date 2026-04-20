@@ -1,21 +1,23 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SettingsSheet } from "./SettingsSheet";
+import { SettingsView } from "./SettingsView";
 
-describe("SettingsSheet", () => {
+describe("SettingsView", () => {
   it("blocks invalid settings and surfaces validation messages", () => {
     const onSave = vi.fn();
 
     render(
-      <SettingsSheet
-        isOpen
+      <SettingsView
+        errorMessage={null}
         initialSettings={{ baseUrl: "", apiKey: "", model: "", systemPrompt: "" }}
-        onClose={() => undefined}
+        onBack={() => undefined}
+        onExport={() => undefined}
+        onImport={() => undefined}
         onSave={onSave}
       />,
     );
 
-    fireEvent.click(screen.getByText("Save Settings"));
+    fireEvent.click(screen.getByText("Save settings"));
 
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByText("Base URL is required.")).toBeInTheDocument();
@@ -25,10 +27,12 @@ describe("SettingsSheet", () => {
     const onSave = vi.fn();
 
     render(
-      <SettingsSheet
-        isOpen
+      <SettingsView
+        errorMessage={null}
         initialSettings={{ baseUrl: "", apiKey: "", model: "", systemPrompt: "" }}
-        onClose={() => undefined}
+        onBack={() => undefined}
+        onExport={() => undefined}
+        onImport={() => undefined}
         onSave={onSave}
       />,
     );
@@ -42,7 +46,7 @@ describe("SettingsSheet", () => {
     fireEvent.change(screen.getByPlaceholderText("gpt-4.1-mini"), {
       target: { value: "demo-model" },
     });
-    fireEvent.click(screen.getByText("Save Settings"));
+    fireEvent.click(screen.getByText("Save settings"));
 
     expect(onSave).toHaveBeenCalledWith({
       baseUrl: "https://api.example.com",
