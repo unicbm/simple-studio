@@ -2,7 +2,7 @@
 
 ## Scope
 
-Tauri Studio is a minimal desktop chat client for OpenAI-compatible `chat/completions` APIs. The main security expectations for this repository are:
+Simple Studio is a minimal desktop chat client for OpenAI-compatible `chat/completions` APIs. The main security expectations for this repository are:
 
 - no committed secrets, credentials, or private exports
 - no unnecessary desktop capabilities or unsafe remote content execution

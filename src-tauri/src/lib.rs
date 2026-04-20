@@ -760,7 +760,7 @@ mod tests {
 
     #[tokio::test]
     async fn recovers_corrupted_json_file_with_backup_and_fallback() {
-        let temp_dir = std::env::temp_dir().join(format!("tauri-studio-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!("simple-studio-{}", uuid::Uuid::new_v4()));
         tokio::fs::create_dir_all(&temp_dir)
             .await
             .expect("temp dir should be created");

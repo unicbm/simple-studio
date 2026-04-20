@@ -1,5 +1,5 @@
 [package]
-name = "tauri-studio"
+name = "simple-studio"
 version = "0.1.0"
 description = "Minimal desktop LLM chat client built with Tauri"
 authors = ["Uni"]

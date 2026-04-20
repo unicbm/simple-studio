@@ -1,10 +1,10 @@
-# Tauri Studio
+# Simple Studio
 
 Minimal desktop LLM chat client built with `Tauri v2`, `React`, `TypeScript`, and `Rust`.
 
 ## Scope
 
-Tauri Studio keeps the surface area intentionally small:
+Simple Studio keeps the surface area intentionally small:
 
 - single-window chat client
 - OpenAI-compatible `chat/completions`

@@ -1,4 +1,4 @@
-# Tauri Studio Agent Guide
+# Simple Studio Agent Guide
 
 This file defines repo-specific defaults for agents working in this repository.
 

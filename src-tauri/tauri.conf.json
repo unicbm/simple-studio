@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tauri Studio",
+  "productName": "Simple Studio",
   "version": "0.1.0",
-  "identifier": "com.tauristudio.desktop",
+  "identifier": "com.simplestudio.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "tauri-app",
-        "title": "Tauri Studio",
+        "title": "Simple Studio",
         "width": 1440,
         "height": 920,
         "minWidth": 1024,

@@ -13,8 +13,8 @@ export function PrimaryNav({
 }: PrimaryNavProps) {
   return (
     <aside className="primary-nav">
-      <div className="brand-mark" aria-label="Tauri Studio">
-        TS
+      <div className="brand-mark" aria-label="Simple Studio">
+        SS
       </div>
 
       <nav className="nav-cluster" aria-label="Primary">
