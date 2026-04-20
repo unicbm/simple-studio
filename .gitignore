@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+*.secret
+tauri-studio-export*.json
+*.corrupt.*.json
 
 # Editor directories and files
 .vscode/*

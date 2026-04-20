@@ -13,6 +13,13 @@ Tauri Studio keeps the surface area intentionally small:
 - JSON import / export
 - Windows-first development and packaging
 
+## Public Repo Notes
+
+- This repository is safe to publish, but the app stores your configured `apiKey` locally on your machine for runtime use.
+- New JSON exports intentionally omit `apiKey`, but exported chat history can still contain sensitive prompts or model output.
+- Do not commit ad-hoc local exports, copied app data, `.env` files, or recovered `*.corrupt.*.json` files.
+- Remote providers must use `https://`. Plain `http://` is only accepted for local loopback targets such as `localhost`, `127.0.0.1`, or `::1`.
+
 Out of scope for this repository:
 
 - MCP
@@ -109,8 +116,6 @@ The current client expects a single OpenAI-compatible endpoint:
 - `baseUrl`
 - `apiKey`
 - `model`
-
-Remote providers must use `https://`. Plain `http://` is only accepted for local loopback targets such as `localhost`, `127.0.0.1`, or `::1`.
 
 Example:
 
