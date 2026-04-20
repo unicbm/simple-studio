@@ -2,7 +2,7 @@
 
 Tauri Studio 是一个极简桌面 LLM 聊天客户端，基于 `Tauri v2 + React + TypeScript + Rust`。
 
-它的目标不是复刻 Cherry Studio 的完整功能面，而是把本地 AI 对话工具压缩成一个足够干净、足够稳定、足够容易维护的最小闭环。
+它的目标是把本地 AI 对话工具压缩成一个足够干净、足够稳定、足够容易维护的最小闭环。
 
 当前版本聚焦这几件事：
 
@@ -201,7 +201,6 @@ type ExportBlob = {
 
 这个仓库当前明确不做：
 
-- Cherry Studio 的 Electron 迁移版
 - 通用 AI 工作台
 - 插件平台
 - 助手市场
