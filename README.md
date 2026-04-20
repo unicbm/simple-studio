@@ -241,5 +241,4 @@ type ExportBlob = {
 
 ## License
 
-当前仓库未单独补充许可证文件前，请先按仓库实际状态处理。  
-如果后续要正式开源分发，建议补一个明确的 `LICENSE`。
+This project is licensed under the `MIT` License.
