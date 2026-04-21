@@ -83,7 +83,7 @@ describe("App", () => {
     render(App);
 
     await waitFor(() => {
-      expect(screen.getByText("Tauri Studio")).toBeInTheDocument();
+      expect(screen.getByText("Simple Studio")).toBeInTheDocument();
     });
 
     expect(screen.getByText("Planned payload")).toBeInTheDocument();

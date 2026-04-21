@@ -22,7 +22,7 @@
     <div class="brand-mark">T</div>
     <div>
       <div class="eyebrow">quiet console</div>
-      <div class="brand-name">Tauri Studio</div>
+      <div class="brand-name">Simple Studio</div>
     </div>
   </div>
 

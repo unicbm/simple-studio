@@ -345,7 +345,7 @@
 
   async function handleExport() {
     const path = await save({
-      defaultPath: "tauri-studio-export.json",
+      defaultPath: "simple-studio-export.json",
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
 
@@ -379,7 +379,7 @@
 {#if loading}
   <main class="loading-shell">
     <div class="loading-card">
-      <span class="section-label">Tauri Studio</span>
+      <span class="section-label">Simple Studio</span>
       <h1>Loading workspace</h1>
       <p>Reading local routes, endpoints, conversations and cache.</p>
     </div>

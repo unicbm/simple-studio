@@ -1,10 +1,10 @@
-# Tauri Studio
+# Simple Studio
 
 Minimal desktop LLM workspace built with `Tauri v2`, `Svelte 5`, `TypeScript`, and `Rust`.
 
 ## Scope
 
-Tauri Studio is now a compact single-window workspace rather than a single-endpoint chat form. The MVP keeps the surface area narrow:
+Simple Studio is now a compact single-window workspace rather than a single-endpoint chat form. The MVP keeps the surface area narrow:
 
 - single workspace with conversation rail, reading column, and context lens
 - OpenAI-compatible endpoint management
