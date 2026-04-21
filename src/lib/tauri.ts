@@ -1,9 +1,13 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
-  AppSettings,
-  ChatSession,
-  ImportedData,
-  StartChatStreamInput,
+  AppStateSnapshot,
+  ConnectivityReport,
+  Conversation,
+  DiscoveredModel,
+  EndpointProfile,
+  Route,
+  RouteTarget,
+  StreamChatViaRouteInput,
   StreamEvent,
 } from "../types";
 
@@ -65,36 +69,45 @@ async function invokeTauri<T>(command: string, args?: Record<string, unknown>) {
   return invoke<T>(command, args);
 }
 
-export async function loadSettings(): Promise<AppSettings> {
-  return invokeTauri<AppSettings>("load_settings");
+export async function listAppState(): Promise<AppStateSnapshot> {
+  return invokeTauri<AppStateSnapshot>("list_app_state");
 }
 
-export async function saveSettings(settings: AppSettings): Promise<void> {
-  await invokeTauri("save_settings", { settings });
+export async function saveEndpoint(endpoint: EndpointProfile): Promise<void> {
+  await invokeTauri("save_endpoint", { endpoint });
 }
 
-export async function loadSessions(): Promise<ChatSession[]> {
-  return invokeTauri<ChatSession[]>("load_sessions");
+export async function deleteEndpoint(endpointId: string): Promise<void> {
+  await invokeTauri("delete_endpoint", { endpointId });
 }
 
-export async function saveSession(session: ChatSession): Promise<void> {
-  await invokeTauri("save_session", { session });
+export async function testEndpointConnectivity(endpointId: string): Promise<ConnectivityReport> {
+  return invokeTauri<ConnectivityReport>("test_endpoint_connectivity", { endpointId });
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await invokeTauri("delete_session", { sessionId });
+export async function discoverEndpointModels(endpointId: string): Promise<DiscoveredModel[]> {
+  return invokeTauri<DiscoveredModel[]>("discover_endpoint_models", { endpointId });
 }
 
-export async function startChatStream(input: StartChatStreamInput): Promise<void> {
+export async function saveRoute(route: Route, targets: RouteTarget[]): Promise<void> {
+  await invokeTauri("save_route", { route, targets });
+}
+
+export async function saveConversation(conversation: Conversation): Promise<void> {
+  await invokeTauri("save_conversation", { conversation });
+}
+
+export async function streamChatViaRoute(input: StreamChatViaRouteInput): Promise<void> {
   await ensureTauriReady();
   const onEvent = new Channel<StreamEvent>();
   onEvent.onmessage = input.onEvent;
 
-  await invokeTauri("start_chat_stream", {
+  await invokeTauri("stream_chat_via_route", {
     payload: {
       requestId: input.requestId,
+      routeId: input.routeId,
+      conversationId: input.conversationId,
       messageId: input.messageId,
-      settings: input.settings,
       messages: input.messages,
     },
     onEvent,
@@ -109,6 +122,6 @@ export async function exportData(path: string): Promise<void> {
   await invokeTauri("export_data", { path });
 }
 
-export async function importData(path: string): Promise<ImportedData> {
-  return invokeTauri<ImportedData>("import_data", { path });
+export async function importData(path: string): Promise<AppStateSnapshot> {
+  return invokeTauri<AppStateSnapshot>("import_data", { path });
 }
