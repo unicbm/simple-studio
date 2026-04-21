@@ -1,76 +1,79 @@
-# Simple Studio
+# Tauri Studio
 
-Minimal desktop LLM chat client built with `Tauri v2`, `React`, `TypeScript`, and `Rust`.
+Minimal desktop LLM workspace built with `Tauri v2`, `Svelte 5`, `TypeScript`, and `Rust`.
 
 ## Scope
 
-Simple Studio keeps the surface area intentionally small:
+Tauri Studio is now a compact single-window workspace rather than a single-endpoint chat form. The MVP keeps the surface area narrow:
 
-- single-window chat client
-- OpenAI-compatible `chat/completions`
+- single workspace with conversation rail, reading column, and context lens
+- OpenAI-compatible endpoint management
+- route-based chat with `priority_failover`
+- model discovery through `GET /v1/models`
+- connectivity testing with user-facing health states
 - streaming responses through Tauri channels
-- local settings and session persistence
+- local JSON snapshot persistence
 - JSON import / export
 - Windows-first development and packaging
 
 ## Public Repo Notes
 
-- This repository is safe to publish, but the app stores your configured `apiKey` locally on your machine for runtime use.
-- New JSON exports intentionally omit `apiKey`, but exported chat history can still contain sensitive prompts or model output.
+- This repository is safe to publish, but the app stores configured API keys locally for runtime use.
+- JSON exports omit `apiKey`, but exported chat history can still contain sensitive prompts or model output.
 - Do not commit ad-hoc local exports, copied app data, `.env` files, or recovered `*.corrupt.*.json` files.
 - Remote providers must use `https://`. Plain `http://` is only accepted for local loopback targets such as `localhost`, `127.0.0.1`, or `::1`.
 
-Out of scope for this repository:
+Out of scope for this MVP:
 
-- MCP
-- RAG / knowledge base
-- plugin system
-- assistant marketplace
-- multi-model compare
-- local model management
-- file parsing and multimodal workflows
+- Anthropic and Gemini adapters
+- MCP, tools, plugin systems, or agent workflows
+- RAG / knowledge base features
+- SQLite / system keychain storage
+- multi-window workflows
+- multimodal file parsing
 
 ## Feature Set
 
+### Workspace
+
+- route rail and conversation rail
+- document-style message stream
+- settings drawer for endpoints, routes, and data actions
+- context lens with include / exclude / pin controls
+- token estimate and output reserve display
+
+### Endpoints and Routes
+
+- create / update / delete OpenAI-compatible endpoints
+- create / update `priority_failover` routes
+- one active route target per route in the MVP UI
+- model discovery cache per endpoint
+- connectivity test with `healthy`, `auth_error`, `unreachable`, `partial`, `rate_limited`, `degraded`
+
 ### Chat
 
-- session list
-- create / delete session
-- streaming output
+- create conversation
+- route-bound streaming chat
 - stop generation
-- retry last turn
-
-### Rendering
-
-- Markdown
-- fenced code blocks
-- copy code
-
-### Settings
-
-- `baseUrl`
-- `apiKey`
-- `model`
-- optional `systemPrompt`
+- Markdown rendering during streaming
 
 ### Local Data
 
-- persisted settings
-- persisted sessions
-- export snapshot as JSON
-- import snapshot from JSON
-- corrupted app data backup and recovery
+- persisted app snapshot in JSON
+- import / export snapshot as JSON
+- legacy migration from `settings.json` + `sessions.json`
+- corrupted state backup and recovery
 
 ## Stack
 
 - `Tauri v2`
-- `React 19`
+- `Svelte 5`
 - `TypeScript`
 - `Vite`
 - `Rust`
 - `reqwest`
 - `Vitest`
-- `Testing Library`
+- `@testing-library/svelte`
 
 ## Repository Layout
 
@@ -79,8 +82,8 @@ Out of scope for this repository:
 ├─ src/
 │  ├─ components/
 │  ├─ lib/
-│  ├─ App.tsx
-│  └─ App.css
+│  ├─ App.svelte
+│  └─ app.css
 ├─ src-tauri/
 │  └─ src/lib.rs
 ├─ AGENTS.md
@@ -109,53 +112,82 @@ Desktop debug bundle:
 npm run tauri build -- --debug
 ```
 
-## Provider Configuration
+## Provider Model
 
-The current client expects a single OpenAI-compatible endpoint:
+The current MVP supports OpenAI-compatible providers only.
 
+An endpoint stores:
+
+- `name`
 - `baseUrl`
 - `apiKey`
+- `defaultModel`
+- `enabled`
+
+A route stores:
+
+- `name`
+- `strategy`
+- `targetIds`
+
+Each route target stores:
+
+- `endpointId`
 - `model`
-
-Example:
-
-- `https://api.deepseek.com`
-- `deepseek-chat`
+- `priority`
+- `enabled`
 
 ## Data Model
 
 ```ts
-type AppSettings = {
+type EndpointProfile = {
+  id: string;
+  name: string;
+  providerKind: "openai-compatible";
   baseUrl: string;
   apiKey: string;
-  model: string;
-  systemPrompt?: string;
+  enabled: boolean;
+  defaultModel?: string;
 };
 
-type ChatMessage = {
+type Route = {
+  id: string;
+  name: string;
+  strategy: "priority_failover";
+  targetIds: string[];
+};
+
+type Message = {
   id: string;
   role: "system" | "user" | "assistant";
   content: string;
   createdAt: string;
-  status?: "done" | "streaming" | "error";
+  status: "done" | "streaming" | "error";
+  includedInContext: boolean;
+  pinned: boolean;
 };
 
-type ChatSession = {
+type Conversation = {
   id: string;
   title: string;
+  routeId: string;
   createdAt: string;
   updatedAt: string;
-  messages: ChatMessage[];
+  messages: Message[];
 };
 
-type ExportBlob = {
+type AppStateSnapshot = {
   schemaVersion: number;
-  settings: AppSettings;
-  sessions: ChatSession[];
+  endpoints: EndpointProfile[];
+  routes: Route[];
+  routeTargets: RouteTarget[];
+  conversations: Conversation[];
+  discoveredModels: DiscoveredModel[];
+  healthReports: ConnectivityReport[];
 };
 ```
 
-New exports intentionally omit `apiKey`. Re-enter the key after importing on another machine.
+Exports omit `apiKey`. Re-enter the key after importing on another machine.
 
 ## Build Output
 
@@ -164,13 +196,13 @@ Debug bundle output:
 - `src-tauri/target/debug/bundle/msi/`
 - `src-tauri/target/debug/bundle/nsis/`
 
-## Roadmap
+## Current MVP Limits
 
-- stronger streaming regression coverage
-- tighter error and recovery paths
-- clearer settings feedback
-- optional theme switcher
-- automated release pipeline
+- only OpenAI-compatible endpoints are implemented
+- only `priority_failover` routing is implemented
+- route UI manages one primary target per route
+- context lens supports `included / pinned / estimate`, not summary checkpoints
+- persistence is JSON-based, not SQLite
 
 ## License
 
