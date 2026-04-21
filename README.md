@@ -1,160 +1,80 @@
 # Simple Studio
 
-Minimal desktop LLM workspace built with `Tauri v2`, `Svelte 5`, `TypeScript`, and `Rust`.
+Simple Studio is a local browser playground for OpenAI-compatible models.
 
-## Scope
+The UI runs in your browser on `localhost`, and the backend is a small Rust HTTP service. The first goal is not a desktop shell or a multi-endpoint workspace. It is a fast, usable AI Studio-style playground with:
 
-Simple Studio is now a compact single-window workspace rather than a single-endpoint chat form. The MVP keeps the surface area narrow:
-
-- single workspace with conversation rail, reading column, and context lens
-- OpenAI-compatible endpoint management
-- route-based chat with `priority_failover`
-- model discovery through `GET /v1/models`
-- connectivity testing with user-facing health states
-- streaming responses through Tauri channels
-- local JSON snapshot persistence
-- JSON import / export
-- Windows-first development and packaging
-
-## Public Repo Notes
-
-- This repository is safe to publish, but the app stores configured API keys locally for runtime use.
-- JSON exports omit `apiKey`, but exported chat history can still contain sensitive prompts or model output.
-- Do not commit ad-hoc local exports, copied app data, `.env` files, or recovered `*.corrupt.*.json` files.
-- Remote providers must use `https://`. Plain `http://` is only accepted for local loopback targets such as `localhost`, `127.0.0.1`, or `::1`.
-
-Out of scope for this MVP:
-
-- Anthropic and Gemini adapters
-- MCP, tools, plugin systems, or agent workflows
-- RAG / knowledge base features
-- SQLite / system keychain storage
-- multi-window workflows
-- multimodal file parsing
-
-## Feature Set
-
-### Workspace
-
-- route rail and conversation rail
-- document-style message stream
-- settings drawer for endpoints, routes, and data actions
-- context lens with include / exclude / pin controls
-- token estimate and output reserve display
-
-### Endpoints and Routes
-
-- create / update / delete OpenAI-compatible endpoints
-- create / update `priority_failover` routes
-- one active route target per route in the MVP UI
-- model discovery cache per endpoint
-- connectivity test with `healthy`, `auth_error`, `unreachable`, `partial`, `rate_limited`, `degraded`
-
-### Chat
-
-- create conversation
-- route-bound streaming chat
-- stop generation
-- Markdown rendering during streaming
-
-### Local Data
-
-- persisted app snapshot in JSON
-- import / export snapshot as JSON
-- legacy migration from `settings.json` + `sessions.json`
-- corrupted state backup and recovery
+- left-side history rail
+- central chat / prompt area
+- right-side run settings
+- OpenAI-compatible streaming chat
+- local JSON persistence for settings and conversations
 
 ## Stack
 
-- `Tauri v2`
 - `Svelte 5`
-- `TypeScript`
 - `Vite`
 - `Rust`
+- `axum`
 - `reqwest`
 - `Vitest`
-- `@testing-library/svelte`
 
-## Repository Layout
+## Local Run
 
-```text
-.
-├─ src/
-│  ├─ components/
-│  ├─ lib/
-│  ├─ App.svelte
-│  └─ app.css
-├─ src-tauri/
-│  └─ src/lib.rs
-├─ AGENTS.md
-└─ README.md
+Start the Rust API:
+
+```powershell
+npm run api
 ```
 
-## Development
+Start the frontend:
 
 ```powershell
 npm install
-npm run tauri dev
+npm run dev
 ```
 
-## Validation
+Then open:
 
-```powershell
-npm test
-npm run build
-cd src-tauri
-cargo test
+```text
+http://127.0.0.1:1420
 ```
 
-Desktop debug bundle:
+Windows one-click launcher:
 
-```powershell
-npm run tauri build -- --debug
-```
+- [start-simple-studio.bat](C:/Users/Uni/Documents/Github/Tauri-Studio/start-simple-studio.bat)
 
-## Provider Model
+## API Surface
 
-The current MVP supports OpenAI-compatible providers only.
+The browser app talks to the Rust backend through local HTTP:
 
-An endpoint stores:
+- `GET /api/bootstrap`
+- `GET /api/settings`
+- `PUT /api/settings`
+- `GET /api/conversations`
+- `POST /api/conversations`
+- `PATCH /api/conversations/:id`
+- `DELETE /api/conversations/:id`
+- `POST /api/chat/stream`
 
-- `name`
-- `baseUrl`
-- `apiKey`
-- `defaultModel`
-- `enabled`
+`POST /api/chat/stream` returns `text/event-stream` frames with:
 
-A route stores:
-
-- `name`
-- `strategy`
-- `targetIds`
-
-Each route target stores:
-
-- `endpointId`
-- `model`
-- `priority`
-- `enabled`
+- `start`
+- `delta`
+- `error`
+- `done`
 
 ## Data Model
 
 ```ts
-type EndpointProfile = {
-  id: string;
-  name: string;
-  providerKind: "openai-compatible";
+type AppSettings = {
   baseUrl: string;
   apiKey: string;
-  enabled: boolean;
-  defaultModel?: string;
-};
-
-type Route = {
-  id: string;
-  name: string;
-  strategy: "priority_failover";
-  targetIds: string[];
+  model: string;
+  systemInstruction: string;
+  temperature: number;
+  maxOutputTokens: number;
+  stream: boolean;
 };
 
 type Message = {
@@ -163,46 +83,63 @@ type Message = {
   content: string;
   createdAt: string;
   status: "done" | "streaming" | "error";
-  includedInContext: boolean;
-  pinned: boolean;
 };
 
 type Conversation = {
   id: string;
   title: string;
-  routeId: string;
   createdAt: string;
   updatedAt: string;
   messages: Message[];
 };
-
-type AppStateSnapshot = {
-  schemaVersion: number;
-  endpoints: EndpointProfile[];
-  routes: Route[];
-  routeTargets: RouteTarget[];
-  conversations: Conversation[];
-  discoveredModels: DiscoveredModel[];
-  healthReports: ConnectivityReport[];
-};
 ```
 
-Exports omit `apiKey`. Re-enter the key after importing on another machine.
+Local data is stored in:
 
-## Build Output
+```text
+./.simple-studio-data/
+```
 
-Debug bundle output:
+Files:
 
-- `src-tauri/target/debug/bundle/msi/`
-- `src-tauri/target/debug/bundle/nsis/`
+- `settings.json`
+- `conversations.json`
 
-## Current MVP Limits
+If an older `app-state.json` exists in that same local data folder, the Rust backend migrates the usable parts into the new model.
 
-- only OpenAI-compatible endpoints are implemented
-- only `priority_failover` routing is implemented
-- route UI manages one primary target per route
-- context lens supports `included / pinned / estimate`, not summary checkpoints
-- persistence is JSON-based, not SQLite
+## Validation
+
+Frontend:
+
+```powershell
+npm test
+npm run build
+```
+
+Backend:
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+## Current Scope
+
+Implemented:
+
+- browser-first local playground
+- AI Studio-inspired three-column layout
+- single saved model configuration
+- basic history management
+- OpenAI-compatible streaming
+
+Not implemented:
+
+- Tauri desktop runtime as the main path
+- multi-endpoint routing
+- model discovery
+- health diagnostics
+- import / export
+- RAG or tool calling
 
 ## License
 

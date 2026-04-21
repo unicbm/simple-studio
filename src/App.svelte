@@ -1,484 +1,433 @@
 <script lang="ts">
-  import { open, save } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
-  import Composer from "./components/Composer.svelte";
-  import ContextLens from "./components/ContextLens.svelte";
-  import ConversationRail from "./components/ConversationRail.svelte";
-  import EndpointPanel from "./components/EndpointPanel.svelte";
-  import MessageStream from "./components/MessageStream.svelte";
-  import SettingsDrawer from "./components/SettingsDrawer.svelte";
-  import WorkspaceHeader from "./components/WorkspaceHeader.svelte";
+  import MarkdownContent from "./components/MarkdownContent.svelte";
   import {
-    abortStream,
-    deleteEndpoint,
-    discoverEndpointModels,
-    exportData,
-    importData,
-    listAppState,
-    saveConversation,
-    saveEndpoint,
-    saveRoute,
-    streamChatViaRoute,
-    testEndpointConnectivity,
-  } from "./lib/tauri";
-  import {
-    appendAssistantChunk,
-    buildRequestMessages,
     createConversation,
-    createEmptySnapshot,
-    createMessage,
-    createTokenEstimate,
-    findRouteTarget,
+    deleteConversation,
+    getBootstrap,
+    renameConversation,
+    saveSettings,
+    streamChat,
+  } from "./lib/api";
+  import {
+    createLocalMessage,
+    DEFAULT_SETTINGS,
     makeConversationTitle,
-    markMessageStatus,
     replaceConversation,
-    updateMessageFlags,
-  } from "./lib/workspace";
-  import type {
-    AppStateSnapshot,
-    ConnectivityReport,
-    Conversation,
-    DiscoveredModel,
-    EndpointProfile,
-    Route,
-    RouteTarget,
-  } from "./types";
+    updateConversation,
+    validateSettings,
+  } from "./lib/playground";
+  import type { AppSettings, Conversation } from "./types";
 
-  let snapshot: AppStateSnapshot = createEmptySnapshot();
-  let loading = true;
-  let currentRequestId: string | null = null;
+  const starterCards = [
+    {
+      title: "Featured",
+      description: "Tune prompts, system instructions, and model parameters in one focused workspace.",
+    },
+    {
+      title: "Code and Chat",
+      description: "Use a single conversation surface for coding help, debugging, and planning.",
+    },
+    {
+      title: "Structured Responses",
+      description: "Iterate on instructions and output shape without leaving the playground.",
+    },
+  ];
+
+  let settings: AppSettings = { ...DEFAULT_SETTINGS };
+  let conversations: Conversation[] = [];
   let activeConversationId = "";
-  let activeRouteId = "";
   let draft = "";
+  let loading = true;
+  let savingSettings = false;
+  let statusMessage = "Loading";
   let errorMessage = "";
-  let statusMessage = "Loading workspace";
-  let firstTokenMs: number | null = null;
-  let settingsOpen = false;
-  let discovering = false;
-  let testingConnectivity = false;
-  let requestStartedAt = 0;
+  let lastSavedMessage = "";
+  let currentAbortController: AbortController | null = null;
 
-  $: conversations = snapshot.conversations;
-  $: routes = snapshot.routes;
   $: activeConversation =
     conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
-  $: activeRoute = routes.find((route) => route.id === activeRouteId) ?? null;
-  $: activeTarget = activeRoute ? findRouteTarget(snapshot, activeRoute.id) : null;
-  $: activeEndpointId = activeTarget?.endpointId ?? "";
-  $: tokenEstimate = createTokenEstimate(activeConversation, draft);
-  $: healthyEndpoints = snapshot.healthReports.filter((report) => report.status === "healthy").length;
+  $: isConfigured = validateSettings(settings).length === 0;
 
   onMount(async () => {
-    await reloadState();
-  });
-
-  async function reloadState() {
-    loading = true;
     try {
-      snapshot = await listAppState();
-      activeRouteId = snapshot.routes.find((route) => route.id === activeRouteId)?.id ?? snapshot.routes[0]?.id ?? "";
-      activeConversationId =
-        snapshot.conversations.find((conversation) => conversation.id === activeConversationId)?.id ??
-        snapshot.conversations[0]?.id ??
-        "";
-      if (!activeConversationId && snapshot.routes[0]) {
-        activeRouteId = snapshot.routes[0].id;
-      }
-      errorMessage = "";
-      statusMessage = snapshot.routes.length > 0 ? "Ready" : "Add an endpoint and a route.";
+      const bootstrap = await getBootstrap();
+      settings = bootstrap.settings;
+      conversations = bootstrap.conversations;
+      activeConversationId = bootstrap.conversations[0]?.id ?? "";
+      statusMessage = "Ready";
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : "Failed to load app state.";
-      statusMessage = "Workspace failed to load";
+      errorMessage = error instanceof Error ? error.message : "Failed to load playground.";
+      statusMessage = "Offline";
     } finally {
       loading = false;
     }
-  }
+  });
 
   function setConversation(nextConversation: Conversation) {
-    snapshot = {
-      ...snapshot,
-      conversations: replaceConversation(snapshot.conversations, nextConversation),
-    };
+    conversations = replaceConversation(conversations, nextConversation);
     activeConversationId = nextConversation.id;
   }
 
-  async function persistConversation(nextConversation: Conversation) {
-    setConversation(nextConversation);
-    await saveConversation(nextConversation);
+  async function handleCreateConversation() {
+    try {
+      const conversation = await createConversation();
+      setConversation(conversation);
+      errorMessage = "";
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to create conversation.";
+    }
   }
 
-  async function ensureConversation() {
-    if (activeConversation) {
-      return activeConversation;
+  async function handleRenameConversation(conversation: Conversation) {
+    const title = window.prompt("Rename conversation", conversation.title);
+    if (!title || title.trim() === conversation.title) {
+      return;
     }
 
-    const conversation = createConversation(activeRouteId);
-    await persistConversation(conversation);
-    return conversation;
+    try {
+      const updated = await renameConversation(conversation.id, title.trim());
+      conversations = replaceConversation(conversations, updated);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to rename conversation.";
+    }
   }
 
-  async function handleNewConversation() {
-    if (!activeRouteId && snapshot.routes[0]) {
-      activeRouteId = snapshot.routes[0].id;
+  async function handleDeleteConversation(conversationId: string) {
+    try {
+      await deleteConversation(conversationId);
+      conversations = conversations.filter((conversation) => conversation.id !== conversationId);
+      if (activeConversationId === conversationId) {
+        activeConversationId = conversations[0]?.id ?? "";
+      }
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to delete conversation.";
+    }
+  }
+
+  async function handleSaveSettings() {
+    const validationErrors = validateSettings(settings);
+    if (validationErrors.length > 0) {
+      errorMessage = validationErrors[0];
+      return;
     }
 
-    const conversation = createConversation(activeRouteId);
-    await persistConversation(conversation);
+    savingSettings = true;
+    try {
+      settings = await saveSettings(settings);
+      lastSavedMessage = "Run settings saved";
+      errorMessage = "";
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Failed to save settings.";
+    } finally {
+      savingSettings = false;
+    }
   }
 
   async function handleSend() {
-    if (!draft.trim() || currentRequestId) {
+    if (!draft.trim() || currentAbortController) {
       return;
     }
 
-    if (!activeRouteId) {
-      settingsOpen = true;
-      errorMessage = "Create a route before chatting.";
+    if (!isConfigured) {
+      errorMessage = "Set Base URL, API key, and model before sending.";
       return;
     }
 
-    const target = findRouteTarget(snapshot, activeRouteId);
-    if (!target) {
-      settingsOpen = true;
-      errorMessage = "Select an endpoint and model for the active route.";
-      return;
+    let conversation = activeConversation;
+    if (!conversation) {
+      conversation = await createConversation();
+      setConversation(conversation);
     }
 
-    const conversation = await ensureConversation();
-    const userMessage = {
-      ...createMessage("user", draft.trim()),
-      status: "done" as const,
-    };
-    const assistantMessage = createMessage("assistant", "");
-    const updatedConversation: Conversation = {
+    const prompt = draft.trim();
+    const userMessage = createLocalMessage("user", prompt, "done");
+    const optimisticConversation: Conversation = {
       ...conversation,
-      routeId: activeRouteId,
-      title:
-        conversation.title === "Untitled conversation"
-          ? makeConversationTitle(userMessage.content)
-          : conversation.title,
+      title: conversation.title === "New chat" ? makeConversationTitle(prompt) : conversation.title,
       updatedAt: new Date().toISOString(),
-      messages: [...conversation.messages, userMessage, assistantMessage],
+      messages: [...conversation.messages, userMessage],
     };
 
-    await persistConversation(updatedConversation);
-    const requestId = crypto.randomUUID();
-    currentRequestId = requestId;
+    setConversation(optimisticConversation);
     draft = "";
+    statusMessage = "Running";
     errorMessage = "";
-    statusMessage = "Generating...";
-    requestStartedAt = performance.now();
-    firstTokenMs = null;
+    lastSavedMessage = "";
+
+    const abortController = new AbortController();
+    currentAbortController = abortController;
 
     try {
-      await streamChatViaRoute({
-        requestId,
-        conversationId: updatedConversation.id,
-        routeId: activeRouteId,
-        messageId: assistantMessage.id,
-        messages: buildRequestMessages({
-          ...updatedConversation,
-          messages: [...conversation.messages, userMessage],
-        }),
-        onEvent: async (event) => {
+      await streamChat({
+        conversationId: optimisticConversation.id,
+        input: prompt,
+        signal: abortController.signal,
+        onEvent: (event) => {
           if (event.event === "start") {
-            statusMessage = "Streaming";
-            return;
-          }
-
-          if (event.event === "meta") {
-            statusMessage = `Streaming via ${event.data.model}`;
+            conversations = updateConversation(conversations, event.data.conversationId, (current) => ({
+              ...current,
+              messages: [
+                ...current.messages,
+                {
+                  id: event.data.assistantMessageId,
+                  role: "assistant",
+                  content: "",
+                  createdAt: new Date().toISOString(),
+                  status: "streaming",
+                },
+              ],
+            }));
             return;
           }
 
           if (event.event === "delta") {
-            if (firstTokenMs === null) {
-              firstTokenMs = Math.max(1, Math.round(performance.now() - requestStartedAt));
-            }
-            const currentConversation =
-              snapshot.conversations.find((candidate) => candidate.id === updatedConversation.id) ??
-              updatedConversation;
-            setConversation(appendAssistantChunk(currentConversation, event.data.messageId, event.data.textChunk));
+            conversations = updateConversation(conversations, event.data.conversationId, (current) => ({
+              ...current,
+              updatedAt: new Date().toISOString(),
+              messages: current.messages.map((message) =>
+                message.id === event.data.messageId
+                  ? {
+                      ...message,
+                      content: `${message.content}${event.data.textChunk}`,
+                      status: "streaming",
+                    }
+                  : message,
+              ),
+            }));
             return;
           }
 
           if (event.event === "error") {
-            const currentConversation =
-              snapshot.conversations.find((candidate) => candidate.id === updatedConversation.id) ??
-              updatedConversation;
-            const nextConversation = markMessageStatus(
-              currentConversation,
-              event.data.messageId,
-              "error",
-              event.data.message,
-            );
-            currentRequestId = null;
-            statusMessage = "Generation failed";
+            statusMessage = "Failed";
             errorMessage = event.data.message;
-            await persistConversation(nextConversation);
+            conversations = updateConversation(conversations, event.data.conversationId, (current) => ({
+              ...current,
+              updatedAt: new Date().toISOString(),
+              messages: current.messages.map((message) =>
+                message.id === event.data.messageId
+                  ? {
+                      ...message,
+                      status: "error",
+                      content: event.data.message,
+                    }
+                  : message,
+              ),
+            }));
             return;
           }
 
-          if (event.event === "stop") {
-            const currentConversation =
-              snapshot.conversations.find((candidate) => candidate.id === updatedConversation.id) ??
-              updatedConversation;
-            const nextConversation = markMessageStatus(currentConversation, event.data.messageId, "done");
-            currentRequestId = null;
+          if (event.event === "done") {
             statusMessage = "Ready";
-            await persistConversation(nextConversation);
+            conversations = updateConversation(conversations, event.data.conversationId, (current) => ({
+              ...current,
+              updatedAt: new Date().toISOString(),
+              messages: current.messages.map((message) =>
+                message.id === event.data.messageId
+                  ? {
+                      ...message,
+                      status: "done",
+                    }
+                  : message,
+              ),
+            }));
           }
         },
       });
     } catch (error) {
-      currentRequestId = null;
-      errorMessage = error instanceof Error ? error.message : "Failed to start stream.";
-      statusMessage = "Stream failed to start";
-    }
-  }
-
-  async function handleStop() {
-    if (!currentRequestId) {
-      return;
-    }
-
-    await abortStream(currentRequestId);
-    currentRequestId = null;
-    statusMessage = "Generation stopped";
-  }
-
-  async function handleToggleInclude(messageId: string, included: boolean) {
-    if (!activeConversation) {
-      return;
-    }
-
-    const nextConversation = updateMessageFlags(activeConversation, messageId, {
-      includedInContext: included,
-    });
-    await persistConversation(nextConversation);
-  }
-
-  async function handleTogglePin(messageId: string, pinned: boolean) {
-    if (!activeConversation) {
-      return;
-    }
-
-    const nextConversation = updateMessageFlags(activeConversation, messageId, {
-      pinned,
-      includedInContext: pinned ? true : activeConversation.messages.find((message) => message.id === messageId)?.includedInContext,
-    });
-    await persistConversation(nextConversation);
-  }
-
-  async function handleSaveEndpoint(event: CustomEvent<{ endpoint: EndpointProfile }>) {
-    await saveEndpoint(event.detail.endpoint);
-    await reloadState();
-  }
-
-  async function handleDeleteEndpoint(event: CustomEvent<{ endpointId: string }>) {
-    await deleteEndpoint(event.detail.endpointId);
-    await reloadState();
-  }
-
-  async function handleSaveRoute(event: CustomEvent<{ route: Route; targets: RouteTarget[] }>) {
-    await saveRoute(event.detail.route, event.detail.targets);
-    await reloadState();
-  }
-
-  function upsertHealthReport(report: ConnectivityReport) {
-    snapshot = {
-      ...snapshot,
-      healthReports: [
-        ...snapshot.healthReports.filter((candidate) => candidate.endpointId !== report.endpointId),
-        report,
-      ],
-    };
-  }
-
-  function upsertDiscoveredModels(endpointId: string, models: DiscoveredModel[]) {
-    snapshot = {
-      ...snapshot,
-      discoveredModels: [
-        ...snapshot.discoveredModels.filter((model) => model.endpointId !== endpointId),
-        ...models,
-      ],
-    };
-  }
-
-  async function handleTestConnectivity() {
-    if (!activeEndpointId) {
-      errorMessage = "Select a route with a valid endpoint target.";
-      return;
-    }
-
-    testingConnectivity = true;
-    try {
-      const report = await testEndpointConnectivity(activeEndpointId);
-      upsertHealthReport(report);
-      statusMessage = `Connectivity ${report.status}`;
-      errorMessage = "";
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : "Connectivity test failed.";
+      if (!abortController.signal.aborted) {
+        errorMessage = error instanceof Error ? error.message : "Failed to stream response.";
+        statusMessage = "Failed";
+      }
     } finally {
-      testingConnectivity = false;
+      currentAbortController = null;
     }
   }
 
-  async function handleDiscoverModels() {
-    if (!activeEndpointId) {
-      errorMessage = "Select a route with a valid endpoint target.";
-      return;
-    }
-
-    discovering = true;
-    try {
-      const models = await discoverEndpointModels(activeEndpointId);
-      upsertDiscoveredModels(activeEndpointId, models);
-      statusMessage = `Discovered ${models.length} models`;
-      errorMessage = "";
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : "Model discovery failed.";
-    } finally {
-      discovering = false;
-    }
-  }
-
-  async function handleExport() {
-    const path = await save({
-      defaultPath: "simple-studio-export.json",
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-
-    if (!path) {
-      return;
-    }
-
-    await exportData(path);
-    statusMessage = "Data exported";
-  }
-
-  async function handleImport() {
-    const path = await open({
-      multiple: false,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-
-    if (!path || Array.isArray(path)) {
-      return;
-    }
-
-    snapshot = await importData(path);
-    activeRouteId = snapshot.routes[0]?.id ?? "";
-    activeConversationId = snapshot.conversations[0]?.id ?? "";
-    settingsOpen = false;
-    statusMessage = "Data imported";
-    errorMessage = "";
+  function handleStop() {
+    currentAbortController?.abort();
+    currentAbortController = null;
+    statusMessage = "Stopped";
   }
 </script>
 
 {#if loading}
   <main class="loading-shell">
     <div class="loading-card">
-      <span class="section-label">Simple Studio</span>
-      <h1>Loading workspace</h1>
-      <p>Reading local routes, endpoints, conversations and cache.</p>
+      <span class="eyebrow">Simple Studio</span>
+      <h1>Loading local playground</h1>
+      <p>Connecting the browser UI to the Rust backend running on localhost.</p>
     </div>
   </main>
 {:else}
-  <main class="app-shell">
-    <ConversationRail
-      {activeConversationId}
-      {activeRouteId}
-      conversations={snapshot.conversations}
-      discoveredModelCount={snapshot.discoveredModels.length}
-      healthyEndpoints={healthyEndpoints}
-      routes={snapshot.routes}
-      on:newconversation={handleNewConversation}
-      on:opendrawer={() => (settingsOpen = true)}
-      on:selectconversation={(event) => {
-        activeConversationId = event.detail.id;
-        const selectedConversation = snapshot.conversations.find(
-          (conversation) => conversation.id === event.detail.id,
-        );
-        if (selectedConversation) {
-          activeRouteId = selectedConversation.routeId;
-        }
-      }}
-      on:selectroute={(event) => {
-        activeRouteId = event.detail.id;
-      }}
-    />
+  <main class="playground-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div>
+          <div class="brand-title">Simple Studio</div>
+          <div class="brand-subtitle">Local Playground</div>
+        </div>
+      </div>
 
-    <section class="workspace">
-      <section class="chat-column">
-        <WorkspaceHeader
-          estimateLabel={tokenEstimate.confidence}
-          firstTokenLabel={firstTokenMs ? `${firstTokenMs}ms` : "n/a"}
-          routeName={activeRoute?.name ?? "unrouted"}
-          statusMessage={statusMessage}
-          title={activeConversation?.title ?? "Threadlet Workspace"}
-        />
+      <button class="nav-pill active" type="button">Playground</button>
+      <button class="new-chat-button" on:click={handleCreateConversation} type="button">
+        + New prompt
+      </button>
 
-        <MessageStream
-          conversation={activeConversation}
-          on:toggleinclude={(event: CustomEvent<{ id: string; included: boolean }>) =>
-            handleToggleInclude(event.detail.id, event.detail.included)}
-          on:togglepin={(event: CustomEvent<{ id: string; pinned: boolean }>) =>
-            handleTogglePin(event.detail.id, event.detail.pinned)}
-        />
+      <div class="history-section">
+        <div class="section-title">History</div>
+        {#if conversations.length === 0}
+          <div class="muted-copy">No history yet. Start with the playground composer.</div>
+        {:else}
+          {#each conversations as conversation}
+            <div class:active={conversation.id === activeConversationId} class="history-item">
+              <button
+                class="history-link"
+                on:click={() => {
+                  activeConversationId = conversation.id;
+                  errorMessage = "";
+                }}
+                type="button"
+              >
+                <span>{conversation.title}</span>
+                <small>{new Date(conversation.updatedAt).toLocaleDateString()}</small>
+              </button>
+              <div class="history-actions">
+                <button aria-label={`Rename ${conversation.title}`} on:click={() => handleRenameConversation(conversation)} type="button">
+                  Rename
+                </button>
+                <button aria-label={`Delete ${conversation.title}`} on:click={() => handleDeleteConversation(conversation.id)} type="button">
+                  Delete
+                </button>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </aside>
 
-        <Composer
-          {currentRequestId}
-          {discovering}
-          {draft}
-          {errorMessage}
-          routes={snapshot.routes}
-          selectedRouteId={activeRouteId}
-          testingConnectivity={testingConnectivity}
-          {tokenEstimate}
-          on:changedraft={(event) => {
-            draft = event.detail.value;
-          }}
-          on:changeroute={(event) => {
-            activeRouteId = event.detail.routeId;
-          }}
-          on:discover={handleDiscoverModels}
-          on:send={handleSend}
-          on:stop={handleStop}
-          on:test={handleTestConnectivity}
-        />
+    <section class="main-pane">
+      <header class="workspace-header">
+        <div class="workspace-heading">
+          <div class="toolbar-icon">≡</div>
+          <div>
+            <div class="eyebrow">Playground</div>
+            <h1>{activeConversation?.title ?? "Explore local models"}</h1>
+          </div>
+        </div>
+        <div class="header-status">
+          <span class="status-chip">{statusMessage}</span>
+          {#if lastSavedMessage}
+            <span class="status-chip subtle">{lastSavedMessage}</span>
+          {/if}
+        </div>
+      </header>
+
+      <section class="chat-surface">
+        {#if !activeConversation || activeConversation.messages.length === 0}
+          <div class="welcome-panel">
+            <h2>Explore local prompts</h2>
+            <div class="starter-grid">
+              {#each starterCards as card}
+                <button class="starter-card" on:click={() => (draft = `Help me with ${card.title.toLowerCase()} in Simple Studio.`)} type="button">
+                  <strong>{card.title}</strong>
+                  <span>{card.description}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {:else}
+          <div class="messages">
+            {#each activeConversation.messages as message}
+              <article class="message-row {message.role}">
+                <div class="message-badge">{message.role}</div>
+                <div class="message-card">
+                  <div class="message-meta">
+                    <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+                    <span>{message.status}</span>
+                  </div>
+                  <MarkdownContent content={message.content} />
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
       </section>
 
-      <aside class="context-lens">
-        <ContextLens
-          conversation={activeConversation}
-          {tokenEstimate}
-          on:toggleinclude={(event: CustomEvent<{ id: string; included: boolean }>) =>
-            handleToggleInclude(event.detail.id, event.detail.included)}
-          on:togglepin={(event: CustomEvent<{ id: string; pinned: boolean }>) =>
-            handleTogglePin(event.detail.id, event.detail.pinned)}
-        />
-        <EndpointPanel
-          activeEndpointId={activeEndpointId}
-          endpoints={snapshot.endpoints}
-          models={snapshot.discoveredModels}
-          reports={snapshot.healthReports}
-        />
-      </aside>
+      <div class="composer-shell">
+        <textarea
+          aria-label="Prompt"
+          bind:value={draft}
+          placeholder="Start typing a prompt to see what your local playground can do"
+          rows="4"
+        ></textarea>
+        <div class="composer-footer">
+          <div class="composer-hints">
+            <span class="hint-chip">{settings.model || "No model configured"}</span>
+            <span class="hint-chip">temp {settings.temperature.toFixed(1)}</span>
+            <span class="hint-chip">{settings.stream ? "stream on" : "stream off"}</span>
+          </div>
+          <div class="composer-actions">
+            {#if errorMessage}
+              <div class="error-banner">{errorMessage}</div>
+            {/if}
+            {#if currentAbortController}
+              <button class="ghost-button" on:click={handleStop} type="button">Stop</button>
+            {/if}
+            <button class="primary-button" disabled={!draft.trim()} on:click={handleSend} type="button">
+              Run
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <SettingsDrawer
-      discoveredModels={snapshot.discoveredModels}
-      endpoints={snapshot.endpoints}
-      open={settingsOpen}
-      routes={snapshot.routes}
-      routeTargets={snapshot.routeTargets}
-      on:close={() => (settingsOpen = false)}
-      on:deleteendpoint={handleDeleteEndpoint}
-      on:export={handleExport}
-      on:import={handleImport}
-      on:saveendpoint={handleSaveEndpoint}
-      on:saveroute={handleSaveRoute}
-    />
+    <aside class="settings-pane">
+      <div class="section-head">
+        <div class="section-title">Run settings</div>
+      </div>
+
+      <div class="settings-card">
+        <label>
+          <span>Base URL</span>
+          <input bind:value={settings.baseUrl} placeholder="https://api.openai.com" />
+        </label>
+        <label>
+          <span>API key</span>
+          <input bind:value={settings.apiKey} placeholder="sk-..." type="password" />
+        </label>
+        <label>
+          <span>Model</span>
+          <input bind:value={settings.model} placeholder="gpt-4.1-mini" />
+        </label>
+        <label>
+          <span>System instructions</span>
+          <textarea bind:value={settings.systemInstruction} rows="5" placeholder="Optional tone and style instructions for the model"></textarea>
+        </label>
+      </div>
+
+      <div class="settings-card">
+        <label>
+          <span>Temperature</span>
+          <div class="range-row">
+            <input bind:value={settings.temperature} max="2" min="0" step="0.1" type="range" />
+            <strong>{settings.temperature.toFixed(1)}</strong>
+          </div>
+        </label>
+        <label>
+          <span>Max output tokens</span>
+          <input bind:value={settings.maxOutputTokens} min="1" type="number" />
+        </label>
+        <label class="toggle-row">
+          <span>Streaming</span>
+          <input bind:checked={settings.stream} type="checkbox" />
+        </label>
+      </div>
+
+      <button class="primary-button full-width" disabled={savingSettings} on:click={handleSaveSettings} type="button">
+        {savingSettings ? "Saving..." : "Save run settings"}
+      </button>
+    </aside>
   </main>
 {/if}

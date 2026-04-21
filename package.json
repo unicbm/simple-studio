@@ -1,19 +1,16 @@
 {
   "name": "simple-studio",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "tauri": "tauri"
+    "preview": "vite preview --host 127.0.0.1",
+    "api": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.0",
-    "@tauri-apps/plugin-opener": "^2",
     "dompurify": "^3.3.0",
     "marked": "^16.4.1",
     "svelte": "^5.39.3"
